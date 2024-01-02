@@ -1,0 +1,126 @@
+# -*- coding: utf-8 -*-
+
+import RPi.GPIO as GPIO
+import time
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+
+SPICLK = 11
+SPIMISO = 9
+SPIMOSI = 10
+SPICS = 8
+mq2_dpin = 26
+mq2_apin = 0
+buzzer_pin = 17
+led_pin = 18
+
+# Email configuration
+email_address = "melekhayta59@gmail.com"
+email_password = "nxzc erpc xump ewpw"
+recipient_email = "halilgoktas15@gmail.com"
+
+def send_email():
+    subject = "GAZ UYARISI"
+    body = "Evinizde gaz Kacagi var dikkatli olun!!"
+
+    msg = MIMEMultipart()
+    msg['From'] = email_address
+    msg['To'] = recipient_email
+    msg['Subject'] = subject
+
+    msg.attach(MIMEText(body, 'plain'))
+
+    with smtplib.SMTP('smtp.gmail.com', 587) as server:
+        server.starttls()
+        server.login(email_address, email_password)
+        text = msg.as_string()
+        server.sendmail(email_address, recipient_email, text)
+
+def init():
+    GPIO.setwarnings(False)
+    GPIO.cleanup()
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setup(SPIMOSI, GPIO.OUT)
+    GPIO.setup(SPIMISO, GPIO.IN)
+    GPIO.setup(SPICLK, GPIO.OUT)
+    GPIO.setup(SPICS, GPIO.OUT)
+    GPIO.setup(mq2_dpin, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+    GPIO.setup(buzzer_pin, GPIO.OUT)
+    GPIO.setup(led_pin, GPIO.OUT)
+
+def readadc(adcnum, clockpin, mosipin, misopin, cspin):
+    if ((adcnum > 7) or (adcnum < 0)):
+        return -1
+    GPIO.output(cspin, True)
+    GPIO.output(clockpin, False)
+    GPIO.output(cspin, False)
+
+    commandout = adcnum
+    commandout |= 0x18
+    commandout <<= 3
+    for i in range(5):
+        if (commandout & 0x80):
+            GPIO.output(mosipin, True)
+        else:
+            GPIO.output(mosipin, False)
+        commandout <<= 1
+        GPIO.output(clockpin, True)
+        GPIO.output(clockpin, False)
+
+    adcout = 0
+    for i in range(12):
+        GPIO.output(clockpin, True)
+        GPIO.output(clockpin, False)
+        adcout <<= 1
+        if (GPIO.input(misopin)):
+            adcout |= 0x1
+
+    GPIO.output(cspin, True)
+    adcout >>= 1
+    return adcout
+
+def activate_buzzer():
+    GPIO.output(buzzer_pin, GPIO.HIGH)
+    time.sleep(0.5)
+    GPIO.output(buzzer_pin, GPIO.LOW)
+
+def activate_led():
+    GPIO.output(led_pin, GPIO.HIGH)
+
+def deactivate_led():
+    GPIO.output(led_pin, GPIO.LOW)
+
+def main():
+    init()
+    print("Lutfen Bekleyiniz...")
+    time.sleep(2)
+    try:
+        while True:
+            COlevel = readadc(mq2_apin, SPICLK, SPIMOSI, SPIMISO, SPICS)
+
+            if not GPIO.input(mq2_dpin):
+                print("Gaz algilandi")
+                activate_buzzer()
+                activate_led()
+                send_email()
+            else:
+                val = (COlevel / 1024.0) * 3.3
+                print("Mevcut Gaz AD degeri = {:.2f} V".format(val))
+                
+                if val > 2.0:
+                    activate_buzzer()
+                    activate_led()
+                    send_email()
+                else:
+                    deactivate_led()
+
+            time.sleep(1)
+
+    except KeyboardInterrupt:
+        pass
+    finally:
+        GPIO.cleanup()
+
+if __name__ == '__main__':
+    main()
